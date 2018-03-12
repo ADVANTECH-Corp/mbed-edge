@@ -25,6 +25,7 @@
 #include <errno.h>
 
 #include "edge-client/edge_client.h"
+#include "edge-client/oem_role_claim.h"
 #include "edge-core/protocol_api.h"
 #include "edge-core/protocol_api_internal.h"
 #include "edge-core/server.h"
@@ -300,6 +301,7 @@ int testable_main(int argc, char **argv)
         edgeclient_create_params.handle_error_cb = error_cb;
         edgeclient_create(&edgeclient_create_params);
         rfs_add_factory_reset_resource();
+        create_oem_role_claim_object();
         // Connect client
         edgeclient_connect();
 
