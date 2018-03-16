@@ -68,6 +68,8 @@ void InitResourcesValues(void);
 extern "C" {
 
 void create_oem_role_claim_object();
+bool is_factory_reset_in_progress(void);
+bool StartFactoryReset(void);
 
 #endif // __cplusplus
 

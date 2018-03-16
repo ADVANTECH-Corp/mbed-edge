@@ -54,6 +54,8 @@
 
 #define OEM_ROLE_CLAIM_OBJECT_VALUE   30000
 
+#define MAX_CHARACTERS_IN_POSITIVE_INT64    19
+
 static int8_t _tasklet = -1;
 
 namespace OemRoleClaim
@@ -115,6 +117,8 @@ uint32_t init_fw_manager();
 void firmware_manager_event_handler(uint32_t event);
 void set_apply_response(uint32_t response);
 
+void do_factory_reset(void);
+
 pt_api_result_code_e set_resource_value(oem_resource_ids_e resource_id, int32_t value);
 pt_api_result_code_e set_resource_value(oem_resource_ids_e resource_id, uint8_t *value, uint32_t value_length);
 bool get_resource_value(oem_resource_ids_e resource_id, uint8_t **value, uint32_t *value_length);
@@ -155,6 +159,11 @@ OemRoleClaimResource_s oem_role_claim_resource_table[] = {
 
 };
 
+#define FACTORY_RESET_OBJECT_ID             3
+#define FACTORY_RESET_OBJECT_INSTANCE_ID    0
+#define FACTORY_RESET_RESOURCE_ID           5
+#define FACTORY_RESET_RESOURCE_TYPE         LWM2M_INTEGER
+#define FACTORY_RESET_RESOURCE_OPERATION    OPERATION_EXECUTE
 
 /* lookup table for printing hexadecimal values */
 const uint8_t hex_table[16] = {
@@ -170,9 +179,13 @@ typedef enum {
     fw_event_manager_state_error = 2
 } fw_event_manager_state;
 
+// Volatile is needed here because this flag is polled through is_factory_reset_in_progress()
+// function from an another thread calling edgeserver_execute_rfs_customer_code().
+volatile bool factory_reset_started = false;
 arm_uc_firmware_details_t active_firmware_details = { 0 };
 fw_event_manager_state firmware_manager_event_handler_state = fw_event_manager_state_ready;
 
+bool is_numeric_up_to_given_length(uint8_t* buffer, uint32_t maxNumOfCharacters);
 
 // states needed for breaking up the callback into few steps which are ran via events
 typedef enum {
@@ -190,12 +203,18 @@ RoleClaimCallbackState callback_state = STATE_CALLBACK_READY;
 #define OEM_TASKLET_INIT_EVENT 0
 #define OEM_TASKLET_FIRMWARE_CALLBACK_EVENT 1
 #define OEM_TASKLET_REBOOT_EVENT 2
+#define OEM_TASKLET_FACTORY_RESET_EVENT 3
 
 // This is the time (in milliseconds) the code will let the POST response to Apply_Oem_Role_Claim
 // resource to be sent until it does a reboot.
 // If one wants the response resends to function at least once, the delay should be longer than
 // MBED_CLIENT_RECONNECTION_INTERVAL (which is 5s by default).
 #define OEM_TASKLET_REBOOT_DELAY 5500
+
+// This is the time (in milliseconds) the code will let the ACK to POST factory reset
+// resource to be sent until it starts the factory reset, which can take a really long time,
+// and which can then block the response sending functionality.
+#define OEM_TASKLET_FACTORY_RESET_DELAY 1000
 
 pt_api_result_code_e OemRoleClaim::set_resource_value(oem_resource_ids_e resource_id, uint8_t *value, uint32_t value_length)
 {
@@ -257,6 +276,12 @@ bool OemRoleClaim::get_resource_string_as_int64(oem_resource_ids_e resource_id, 
 
     bool retval = get_resource_value(resource_id, &value_buf, &value_len);
     if (retval == false) {
+        return false;
+    }
+
+    // Validating we are dealing with a string that represents a number
+    if (false == is_numeric_up_to_given_length(value_buf, 
+                                               MAX_CHARACTERS_IN_POSITIVE_INT64)) {
         return false;
     }
 
@@ -870,6 +895,11 @@ void OemRoleClaim::oem_tasklet_event_handler(arm_event_s &event)
             os_reboot();
             break;
 
+        case OEM_TASKLET_FACTORY_RESET_EVENT:
+            tr_debug("OEM_TASKLET_FACTORY_RESET_EVENT");
+            do_factory_reset();
+            break;
+
         default:
             assert(false);
     }
@@ -1013,7 +1043,7 @@ void OemRoleClaim::apply_oem_role_claim_callback(void *arguments)
 
     // Checking if SwManufacturer == mbed.Manufacturer
     if ((params_value_size_1 == params_value_size_2) &&
-            (memcmp(params_value_buf_1, params_value_buf_2, params_value_size_1) == 0)) {
+        (memcmp(params_value_buf_1, params_value_buf_2, params_value_size_1) == 0)) {  
 
         tr_debug("apply_oem_role_claim_callback - starting async get_current_image_version..");
 
@@ -1043,6 +1073,30 @@ void OemRoleClaim::apply_oem_role_claim_callback(void *arguments)
     }
 
     tr_debug("OemRoleClaim::apply_oem_role_claim_callback()..done");
+}
+
+bool OemRoleClaim::is_numeric_up_to_given_length(uint8_t* buffer, uint32_t maxNumOfCharacters)
+{
+    uint32_t i;
+    
+    for (i = 0 ; i < maxNumOfCharacters ; i++)
+    {
+        // We have to have at least one digit
+        if (i > 0 && 0 == buffer[i]) {
+            return true;
+        }
+
+        if (buffer[i] < (uint8_t)'0' || buffer[i] > (uint8_t)'9' ) {
+            return false;
+        }
+    }
+
+    // If reached the maximum number of characters, validating terminating NULL
+    if (0 != buffer[i]) {
+        return false;
+    }
+
+    return true;
 }
 
 // The next phase of apply_oem_role_claim_callback(), which is called either from event handler
@@ -1362,6 +1416,69 @@ void create_oem_role_claim_object(void)
     if (status == MBED_ORC_SUCCESS) { \
         status = _orc_error; \
     }
+
+bool is_factory_reset_in_progress(void)
+{
+    return OemRoleClaim::factory_reset_started;
+}
+
+// Start a asynchronous factory reset sequence. The asynchronous handling is needed as the
+// operation can take really long and it would otherwise block the sending of acknowledge message
+// POST request. If the ACK is not sent, the server will re-issue the same POST again and again.
+bool StartFactoryReset(void)
+{
+    if (OemRoleClaim::factory_reset_started == false) {
+        tr_debug("StartFactoryReset: starting a new factory reset after %dms", OEM_TASKLET_FACTORY_RESET_DELAY);
+        OemRoleClaim::send_internal_event(OEM_TASKLET_FACTORY_RESET_EVENT, OEM_TASKLET_FACTORY_RESET_DELAY);
+        OemRoleClaim::factory_reset_started = true;
+    } else {
+        tr_warn("StartFactoryReset: factory reset already in progress, not staring a new one");
+    }
+
+    return OemRoleClaim::factory_reset_started;
+}
+
+void OemRoleClaim::do_factory_reset(void)
+{
+    uint32_t status = FactoryResetHander();
+    tr_debug("OemRoleClaim::do_factory_reset, FactoryResetHander: %" PRIu32, status);
+
+    kcm_status_e kcm_status = kcm_factory_reset();
+    int resource_value;
+
+    if (kcm_status != KCM_STATUS_SUCCESS) {
+        tr_error("Failed to do factory reset - %d", kcm_status);
+        resource_value = MBED_ORC_KCM_FACTORY_RESET_FAILED;
+    } else {
+        OemRoleClaim::InitResourcesValues();
+
+        resource_value = MBED_ORC_SUCCESS;
+    }
+
+    tr_debug("Factory init setting reset value to: %d", resource_value);
+
+    // max len of "-9223372036854775808" plus zero termination
+    char buffer[20+1];
+    uint32_t size = m2m::itoa_c(resource_value, buffer);
+    edgeclient_set_resource_value(
+           NULL,
+           FACTORY_RESET_OBJECT_ID,
+           FACTORY_RESET_OBJECT_INSTANCE_ID,
+           FACTORY_RESET_RESOURCE_ID,
+           (const unsigned char*)buffer,
+           size,
+           FACTORY_RESET_RESOURCE_TYPE,
+           FACTORY_RESET_RESOURCE_OPERATION,
+           NULL);
+
+    // Finally send the reponse to the POST request which started this operation. This will
+    // stop the server from re-sending the POST in case the ACK was lost.
+    //factory_reset_resource->send_delayed_post_response(); // Currently going with the double kcm_factory_reset() flow. edge will do this.
+
+    // Clear operation in progress flag.
+    OemRoleClaim::factory_reset_started = false;
+    tr_debug("OemRoleClaim::do_factory_reset: done");
+}
 
 uint32_t OemRoleClaim::FactoryResetHander(void)
 {

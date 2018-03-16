@@ -18,7 +18,9 @@
  * ----------------------------------------------------------------------------
  */
 
+#include <time.h>
 #include "edge-client/edge_client.h"
+#include "edge-client/oem_role_claim.h"
 #include "mbed-trace/mbed_trace.h"
 #include "edge-core/edge_server_customer_code.h"
 #define TRACE_GROUP "escstmr"
@@ -29,6 +31,27 @@ bool edgeserver_execute_rfs_customer_code(edgeclient_request_context_t *request_
             request_ctx->object_id,
             request_ctx->object_instance_id,
             request_ctx->resource_id);
+
+    // Start a asynchronous factory reset sequence.
+    // Because we are blocking on the next line, this is actually more of a synchronous operation.
+    // Factory reset was implemented as asynchronous operation because the original idea was that
+    // factory reset is initiated from resource execute callback function where you cannot block
+    // for long time (>10ms).
+    StartFactoryReset();
+
+    // The OEM Role Claim factory reset is an asynchronous operation.
+    // The edge server needs to send the result of that operation by calling edgeclient_send_delayed_response()
+    // after this function returns.
+    // Therefore, this function needs to wait for the asynchronous operation to complete before returning.
+    // This is currently done with a loop that polls is_factory_reset_in_progress() return value.
+    // This polling delay should probably be upgraded to more conventional semaphore wait.
+    struct timespec delay;
+    delay.tv_sec = 0;
+    delay.tv_nsec = 100 * 1000 * 1000; // 100 ms sleep
+    while (is_factory_reset_in_progress()) {
+        nanosleep(&delay, NULL);
+    }
+
     return true;
 }
 
