@@ -166,5 +166,6 @@
 #define PAL_FS_MOUNT_POINT_SECONDARY "/mnt/kcm"
 #define PAL_USER_DEFINED_CONFIGURATION "config/sotp_fs_wise3610.h"
 #define ARM_UC_OEM_TRANSFER_MODE 1
+#define ARM_UC_SOCKET_TIMEOUT_MS 5*60*1000
 
 #endif // ndef __MBED_EDGE_BUILD_CONFIG_H__
