@@ -326,7 +326,7 @@ bool OemRoleClaim::get_resource_value_length(oem_resource_ids_e resource_id, uin
 
 void OemRoleClaim::firmware_manager_event_handler(uint32_t event)
 {
-    tr_debug("firmware_manager_event_handler received and thread id is :%p", (void *)pal_osThreadGetId());
+    tr_debug("firmware_manager_event_handler received");
     switch (event) {
         case UCFM_EVENT_INITIALIZE_DONE:
             tr_debug("UCFM_EVENT_INITIALIZE_DONE");
@@ -1121,7 +1121,7 @@ void OemRoleClaim::apply_oem_role_claim_callback_continue_get_current_version()
     }
 
     //set advantech.MinimumOemFwVersionMonotonicCounter to current software version counter
-    kcm_status = update_kcm_param(oem_min_fw_ver_monotonic_counter, (uint8_t *)image_version, sizeof(uint64_t));
+    kcm_status = update_kcm_param(oem_min_fw_ver_monotonic_counter, (uint8_t *)&image_version, sizeof(uint64_t));
     if (kcm_status != KCM_STATUS_SUCCESS) {
         tr_error("Failed updating KCM value: %s, status: %u, returning: %u",
                  oem_min_fw_ver_monotonic_counter, kcm_status, MBED_ORC_FAILED_SETTING_MIN_OEM_FW_VERSION_TO_KCM);
