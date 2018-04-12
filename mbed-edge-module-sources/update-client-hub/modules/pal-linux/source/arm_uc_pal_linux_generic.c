@@ -158,14 +158,21 @@ arm_uc_error_t ARM_UC_PAL_Linux_Initialize_Generic(ARM_UC_PAAL_UPDATE_SignalEven
 {
 #if 1
     extern arm_ucp_worker_config_t arm_uc_worker_parameters;
-
-    arm_uc_worker_parameters.activate       = &arm_uc_worker_parameters_activate;
+// Add by Advantech
+/*    arm_uc_worker_parameters.activate       = &arm_uc_worker_parameters_activate;
     arm_uc_worker_parameters.active_details = &arm_uc_worker_parameters_active_details;
     arm_uc_worker_parameters.details        = &arm_uc_worker_parameters_details;
     arm_uc_worker_parameters.finalize       = &arm_uc_worker_parameters_finalize;
     arm_uc_worker_parameters.initialize     = &arm_uc_worker_parameters_initialize;
     arm_uc_worker_parameters.installer      = &arm_uc_worker_parameters_installer;
-    arm_uc_worker_parameters.prepare        = &arm_uc_worker_parameters_prepare;
+    arm_uc_worker_parameters.prepare        = &arm_uc_worker_parameters_prepare;*/
+    arm_uc_worker_parameters.activate       = NULL;
+    arm_uc_worker_parameters.active_details = NULL;
+    arm_uc_worker_parameters.details        = NULL;
+    arm_uc_worker_parameters.finalize       = NULL;
+    arm_uc_worker_parameters.initialize     = NULL;
+    arm_uc_worker_parameters.installer      = NULL;
+    arm_uc_worker_parameters.prepare        = NULL;
 //    arm_uc_worker_parameters.read           = &arm_uc_worker_parameters_read;
 //    arm_uc_worker_parameters.write          = &arm_uc_worker_parameters_write;
 #endif

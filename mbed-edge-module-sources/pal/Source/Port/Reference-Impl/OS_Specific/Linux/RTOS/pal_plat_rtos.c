@@ -178,7 +178,9 @@ palStatus_t pal_plat_osThreadRun(palThreadServiceBridge_t* bridge, palThreadID_t
     palStatus_t status = PAL_SUCCESS;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
-    int err = pthread_attr_setstacksize(&attr, bridge->threadData->stackSize);
+    // Add by Advantech
+    //int err = pthread_attr_setstacksize(&attr, bridge->threadData->stackSize);
+    int err = pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN+0x1000);
     if (0 != err)
     {
         status = PAL_ERR_GENERIC_FAILURE;

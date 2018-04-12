@@ -25,7 +25,9 @@ palStatus_t pal_plat_getRandomBufferFromHW(uint8_t *randomBuf, size_t bufSizeByt
 	FILE *fp;
 	size_t actualRead = 0;
 
-	fp = fopen("/dev/random", "r");
+	// Modify by Advantech
+	//fp = fopen("/dev/random", "r");
+	fp = fopen("/dev/hwrng", "r");
 	if (NULL != fp)
 	{
 		actualRead = fread(randomBuf, 1, bufSizeBytes, fp);

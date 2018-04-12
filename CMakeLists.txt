@@ -51,11 +51,14 @@ add_subdirectory (edge-rpc)
 add_subdirectory (pt-client)
 add_subdirectory (pt-example)
 
+# Add by Advantech
+set (SKIP_LIB_CHECK 1)
 # Conditionally build lora-pt if mosquitto is available
 unset(MOSQUITTO_LIB CACHE)
 find_library(MOSQUITTO_LIB mosquitto)
 if (SKIP_LIB_CHECK OR MOSQUITTO_LIB OR MBED_EDGE_BUILD_CFG_SKIP_LIB_CHECK)
   add_subdirectory (lorapt-example)
+  add_subdirectory (pt-example_1520)
 else ()
   message("Not building the mqtt protocol translator since mosquitto library was not found!")
 endif ()
