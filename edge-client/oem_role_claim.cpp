@@ -113,7 +113,9 @@ uint32_t invalidateCandidateImages(void);
 void os_reboot(void);
 uint32_t get_current_image_version_start();
 uint32_t get_current_image_version_done(uint64_t &image_version);
-uint32_t init_fw_manager();
+uint32_t init_fw_manager_start();
+uint32_t init_fw_manager_done();
+void apply_oem_role_claim_callback_continue_init_fw_manager();
 void firmware_manager_event_handler(uint32_t event);
 void set_apply_response(uint32_t response);
 
@@ -190,12 +192,26 @@ bool is_numeric_up_to_given_length(uint8_t* buffer, uint32_t maxNumOfCharacters)
 // states needed for breaking up the callback into few steps which are ran via events
 typedef enum {
     STATE_CALLBACK_READY,
+    STATE_INITIALIZE_STARTED,
+    STATE_INITIALIZE_DONE,
     STATE_GET_CURRENT_IMAGE_VERSION_STARTED,
     STATE_GET_CURRENT_IMAGE_VERSION_DONE,
     STATE_WAITING_FOR_REBOOT
 } RoleClaimCallbackState;
 
 RoleClaimCallbackState callback_state = STATE_CALLBACK_READY;
+
+// Following variables need to be stored while stepping the event driven state machine
+// from STATE_INITIALIZE_STARTED to STATE_INITIALIZE_DONE. 
+// XXX: A better fix would be to change logic so that the steps would not depend
+// on the preivious results so much.
+
+//max buffer for config params and sotp values
+uint8_t params_value_buf_1[CONFIG_PARAMS_BUFFER_SIZE];
+uint8_t params_value_buf_2[CONFIG_PARAMS_BUFFER_SIZE];
+size_t params_value_size_1 = 0;
+size_t params_value_size_2 = 0;
+
 
 } // namespace OemRoleClaim
 
@@ -330,7 +346,14 @@ void OemRoleClaim::firmware_manager_event_handler(uint32_t event)
     switch (event) {
         case UCFM_EVENT_INITIALIZE_DONE:
             tr_debug("UCFM_EVENT_INITIALIZE_DONE");
-            // XXX: is this used/needed?! if so, then add the event passing here too
+            firmware_manager_event_handler_state = fw_event_manager_state_finished;
+            send_internal_event(OEM_TASKLET_FIRMWARE_CALLBACK_EVENT, 0);
+            break;
+
+        case ARM_UC_PAAL_EVENT_INITIALIZE_ERROR:
+            tr_error("UCFM_EVENT_INITIALIZE_ERROR");
+            firmware_manager_event_handler_state = fw_event_manager_state_error;
+            send_internal_event(OEM_TASKLET_FIRMWARE_CALLBACK_EVENT, 0);
             break;
 
         case UCFM_EVENT_PREPARE_DONE:
@@ -368,7 +391,9 @@ void OemRoleClaim::firmware_manager_event_handler(uint32_t event)
     }
 }
 
-uint32_t OemRoleClaim::init_fw_manager()
+// Issue a asynchronous Initialize() call. The code must wait for the
+// firmware_manager_event_handler callback, which triggers the next step
+uint32_t OemRoleClaim::init_fw_manager_start()
 {
     firmware_manager_event_handler_state = fw_event_manager_state_ready;
 
@@ -385,6 +410,17 @@ uint32_t OemRoleClaim::init_fw_manager()
     return MBED_ORC_SUCCESS;
 }
 
+// status code checking functionality, called after the callback of Initialize() is finished.
+uint32_t OemRoleClaim::init_fw_manager_done()
+{
+    tr_debug("init_fw_manager_done, state: %d", firmware_manager_event_handler_state);
+
+    if (firmware_manager_event_handler_state == fw_event_manager_state_finished) {
+        return MBED_ORC_SUCCESS;
+    } else  {
+        return MBED_ORC_INIT_FW_MANAGER_ERROR;
+    }
+}
 
 uint32_t OemRoleClaim::invalidateCandidateImages()
 {
@@ -878,9 +914,16 @@ void OemRoleClaim::oem_tasklet_event_handler(arm_event_s &event)
         case OEM_TASKLET_INIT_EVENT:
             tr_debug("OEM_TASKLET_INIT_EVENT - tasklet initialized");
             break;
+
         case OEM_TASKLET_FIRMWARE_CALLBACK_EVENT:
             tr_debug("OEM_TASKLET_FIRMWARE_CALLBACK_EVENT");
-            if (callback_state == STATE_GET_CURRENT_IMAGE_VERSION_STARTED) {
+            if (callback_state == STATE_INITIALIZE_STARTED) {
+                // continue the initialization
+                apply_oem_role_claim_callback_continue_init_fw_manager();
+            } else if (callback_state == STATE_INITIALIZE_DONE) {
+                // there should not be more than one response for a initialization
+                assert(false);
+            } else if (callback_state == STATE_GET_CURRENT_IMAGE_VERSION_STARTED) {
                 apply_oem_role_claim_callback_continue_get_current_version();
             } else if (callback_state == STATE_GET_CURRENT_IMAGE_VERSION_DONE) {
                 // there should not be more than one response for a version query
@@ -908,11 +951,6 @@ void OemRoleClaim::oem_tasklet_event_handler(arm_event_s &event)
 void OemRoleClaim::apply_oem_role_claim_callback(void *arguments)
 {
     (void) arguments;
-    //max buffer for config params and sotp values
-    uint8_t params_value_buf_1[CONFIG_PARAMS_BUFFER_SIZE];
-    uint8_t params_value_buf_2[CONFIG_PARAMS_BUFFER_SIZE];
-    size_t params_value_size_1 = 0;
-    size_t params_value_size_2 = 0;
     uint32_t status = MBED_ORC_SUCCESS;
 
     tr_debug("OemRoleClaim::apply_oem_role_claim_callback()..");
@@ -1014,7 +1052,36 @@ void OemRoleClaim::apply_oem_role_claim_callback(void *arguments)
     tr_debug("OEM Role claim flow initiated");
 
     //init fw manager
-    status = init_fw_manager();
+    status = init_fw_manager_start();
+    if (status != MBED_ORC_SUCCESS) {
+        tr_error("Failed init_fw_manager, returning: %" PRIu32, status);
+        set_apply_response(status);
+        return;
+    }
+
+    tr_debug("apply_oem_role_claim_callback - async init_fw_manager started, waiting for event");
+
+    // the next step is in apply_oem_role_claim_callback_continue_init_fw_manager(),
+    // which is called when the operation started by init_fw_manager_start() completes.
+
+    callback_state = STATE_INITIALIZE_STARTED;
+}
+
+
+void OemRoleClaim::apply_oem_role_claim_callback_continue_init_fw_manager()
+{
+    // this is the next step of async init_fw_manager()
+
+    tr_debug("apply_oem_role_claim_callback_continue_init_fw_manager()");
+
+    assert(callback_state == STATE_INITIALIZE_STARTED);
+
+    callback_state = STATE_INITIALIZE_DONE;
+
+    uint32_t status;
+
+    // check the result of Initialize(), end the sequence if it failed.
+    status = init_fw_manager_done();
     if (status != MBED_ORC_SUCCESS) {
         tr_error("Failed init_fw_manager, returning: %" PRIu32, status);
         set_apply_response(status);
