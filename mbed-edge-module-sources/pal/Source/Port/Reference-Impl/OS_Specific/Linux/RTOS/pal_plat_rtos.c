@@ -185,7 +185,9 @@ palStatus_t pal_plat_osThreadCreate(palThreadFuncPtr function, void* funcArgumen
     }
     ptrAttr = &attr;
 
-    err = pthread_attr_setstacksize(ptrAttr, stackSize);
+    // Add by Advantech
+    //err = pthread_attr_setstacksize(ptrAttr, stackSize);
+    err = pthread_attr_setstacksize(ptrAttr, PTHREAD_STACK_MIN+0x1000);
     if (0 != err)
     {
         goto finish;
