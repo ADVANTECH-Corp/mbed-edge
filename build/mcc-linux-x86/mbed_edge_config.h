@@ -95,20 +95,20 @@
 #define MBED_CONF_MBED_TRACE_ENABLE 1
 #define PAL_USER_DEFINED_CONFIGURATION "config/sotp_fs_linux.h"
 #define RESOURCE_ATTRIBUTES_LIST 1
-#define PAL_FS_MOUNT_POINT_PRIMARY "/cache"
-#define PAL_FS_MOUNT_POINT_SECONDARY "/cache"
+#define PAL_FS_MOUNT_POINT_PRIMARY "/etc/mcc_config"
+#define PAL_FS_MOUNT_POINT_SECONDARY "/etc/mcc_config"
 #define __LINUX__ 1
 
 // Add by Advantech
 // [Developer Mode]
 //  Need to add the mbed_cloud_dev_credentials.c file to the edge-client folder
-//#define DEVELOPER_MODE 1
+#define DEVELOPER_MODE 1
 
 // [Support OTA]
 #define MBED_CLOUD_CLIENT_SUPPORT_UPDATE 1
-// #define MBED_CLOUD_DEV_UPDATE_ID 1
-// #define MBED_CLOUD_DEV_UPDATE_PSK 1
-// #define MBED_CLOUD_DEV_UPDATE_CERT 1
+#define MBED_CLOUD_DEV_UPDATE_ID 1
+#define MBED_CLOUD_DEV_UPDATE_PSK 1
+#define MBED_CLOUD_DEV_UPDATE_CERT 1
 #define MBED_CLOUD_CLIENT_UPDATE_STORAGE ARM_UCP_LINUX_GENERIC
 #define ARM_UC_SOCKET_TIMEOUT_MS 5*60*1000
 #define PAL_UPDATE_FIRMWARE_DIR PAL_FS_MOUNT_POINT_PRIMARY
